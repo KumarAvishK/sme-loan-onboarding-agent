@@ -15,49 +15,23 @@ def _audit(event: str, details: Dict[str, Any] | None = None):
     return [{"event": event, "details": details or {}}]
 
 
-def _continue_gate(stage: str, title: str, message: str, next_stage: str):
-    """Pause after a stage's output has been persisted.
-
-    IMPORTANT: interrupt() must not happen before a node's output is returned,
-    otherwise LangGraph has nothing new to checkpoint for that node.
-    Gate nodes solve that by pausing only after the previous stage has updated state.
-    """
-    interrupt({"stage": stage, "title": title, "message": message})
-    return {"stage": next_stage}
-
-
-def intake_stage(state: LoanState):
+def application_node(state: LoanState):
     app = state["application"]
     return {
-        "stage": "application",
+        "stage": "documents",
         "audit": _audit("application_submitted", {"application_id": app["application_id"]}),
     }
 
 
-def application_gate(state: LoanState):
-    return _continue_gate(
-        "application",
-        "Application received",
-        "Application captured. Review the applicant information and continue to document submission.",
-        "documents",
-    )
-
-
-def documents_stage(state: LoanState):
-    payload = interrupt({
-        "stage": "documents",
-        "title": "Documents",
-        "message": "Upload the required documents, then continue.",
-    })
-    docs = payload if isinstance(payload, dict) else {}
+def documents_node(state: LoanState):
+    docs = state.get("documents", {})
     return {
-        "documents": docs,
         "stage": "kyb",
         "audit": _audit("documents_received", docs),
     }
 
 
-def kyb_stage(state: LoanState):
+def kyb_node(state: LoanState):
     app = state["application"]
     result = {
         "kyb_status": "PASS",
@@ -67,147 +41,82 @@ def kyb_stage(state: LoanState):
         "ownership_check": "PASS",
         "screening": "CLEAR",
     }
-    return {
-        "kyb": result,
-        "stage": "kyb",
-        "audit": _audit("kyb_completed", result),
-    }
+    return {"kyb": result, "stage": "bureau", "audit": _audit("kyb_completed", result)}
 
 
-def kyb_gate(state: LoanState):
-    return _continue_gate(
-        "kyb",
-        "KYC / KYB verification",
-        "Business identity and onboarding checks have completed. Review the result before continuing to bureau checks.",
-        "bureau",
-    )
-
-
-def bureau_stage(state: LoanState):
+def bureau_node(state: LoanState):
     app = state["application"]
     result = {
-        "bureau_score": int(app.get("bureau_score", 0)),
+        "bureau_score": int(app.get("bureau_score", 748)),
         "business_dpd": int(app.get("business_dpd", 0)),
         "promoter_dpd": int(app.get("promoter_dpd", 0)),
-        "recent_enquiries": int(app.get("recent_bureau_enquiries", 0)),
+        "recent_enquiries": int(app.get("recent_bureau_enquiries", 2)),
         "outstanding_exposure": float(app.get("existing_debt", 0)),
     }
-    return {"bureau": result, "stage": "bureau", "audit": _audit("bureau_completed", result)}
+    return {"bureau": result, "stage": "gst", "audit": _audit("bureau_completed", result)}
 
 
-def bureau_gate(state: LoanState):
-    return _continue_gate(
-        "bureau",
-        "Credit bureau",
-        "Business and promoter bureau information has been retrieved. Review score, DPD and exposure.",
-        "gst",
-    )
-
-
-def gst_stage(state: LoanState):
+def gst_node(state: LoanState):
     app = state["application"]
     turnover = float(app.get("annual_turnover", 0))
     gst_turnover = float(app.get("gst_turnover", turnover))
     variance = (gst_turnover - turnover) / turnover if turnover else 0
     result = {
         "gst_turnover": gst_turnover,
-        "filings_current": bool(app.get("gst_filings_current", False)),
+        "filings_current": bool(app.get("gst_filings_current", True)),
         "turnover_variance_pct": round(variance, 4),
     }
-    return {"gst": result, "stage": "gst", "audit": _audit("gst_completed", result)}
+    return {"gst": result, "stage": "cashflow", "audit": _audit("gst_completed", result)}
 
 
-def gst_gate(state: LoanState):
-    return _continue_gate(
-        "gst",
-        "GST / tax verification",
-        "GST turnover and filing status have been checked. Review the reconciliation before continuing.",
-        "cashflow",
-    )
-
-
-def cashflow_stage(state: LoanState):
+def cashflow_node(state: LoanState):
     app = state["application"]
     inflows = float(app.get("avg_monthly_business_inflows", 0))
     outflows = float(app.get("avg_monthly_business_outflows", 0))
     result = {
         "avg_monthly_inflows": inflows,
         "avg_monthly_outflows": outflows,
-        "cashflow_volatility": float(app.get("cashflow_volatility", 0)),
+        "cashflow_volatility": float(app.get("cashflow_volatility", 0.12)),
         "monthly_surplus": inflows - outflows,
     }
-    return {"cashflow": result, "stage": "cashflow", "audit": _audit("cashflow_completed", result)}
+    return {"cashflow": result, "stage": "financials", "audit": _audit("cashflow_completed", result)}
 
 
-def cashflow_gate(state: LoanState):
-    return _continue_gate(
-        "cashflow",
-        "Banking / cash-flow analysis",
-        "Consent-based banking data has been summarized. Review inflows, outflows and surplus.",
-        "financials",
-    )
-
-
-def financials_stage(state: LoanState):
+def financials_node(state: LoanState):
     app = state["application"]
     current_ratio = float(app.get("current_assets", 0)) / max(float(app.get("current_liabilities", 1)), 1)
     debt_to_ebitda = float(app.get("existing_debt", 0)) / max(float(app.get("annual_ebitda", 1)), 1)
     proposed_debt_service = float(app.get("requested_amount", 0)) / max(float(app.get("tenure_months", 12)) / 12, 1)
-    dscr = float(app.get("annual_ebitda", 0)) / max(float(app.get("annual_interest", 0)) + float(app.get("annual_principal", 0)) + proposed_debt_service, 1)
+    dscr = float(app.get("annual_ebitda", 0)) / max(
+        float(app.get("annual_interest", 0)) + float(app.get("annual_principal", 0)) + proposed_debt_service, 1
+    )
     result = {
         "current_ratio": round(current_ratio, 2),
         "debt_to_ebitda": round(debt_to_ebitda, 2),
         "annual_ebitda": float(app.get("annual_ebitda", 0)),
         "dscr_demo": round(dscr, 2),
     }
-    return {"financials": result, "stage": "financials", "audit": _audit("financial_analysis_completed", result)}
+    return {"financials": result, "stage": "fraud", "audit": _audit("financial_analysis_completed", result)}
 
 
-def financials_gate(state: LoanState):
-    return _continue_gate(
-        "financials",
-        "Financial analysis",
-        "Financial ratios and repayment-capacity metrics have been calculated deterministically.",
-        "fraud",
-    )
-
-
-def fraud_stage(state: LoanState):
+def fraud_node(state: LoanState):
     flags = state["application"].get("fraud_flags", [])
     result = {"fraud_risk": "HIGH" if flags else "LOW", "flags": flags}
-    return {"fraud": result, "stage": "fraud", "audit": _audit("fraud_completed", result)}
+    return {"fraud": result, "stage": "policy", "audit": _audit("fraud_completed", result)}
 
 
-def fraud_gate(state: LoanState):
-    return _continue_gate(
-        "fraud",
-        "Fraud / anomaly screening",
-        "Initial fraud and anomaly checks have completed. Review any flags before policy evaluation.",
-        "policy",
-    )
-
-
-def policy_stage(state: LoanState):
+def policy_node(state: LoanState):
     r = run_policy_engine(
         state["application"], state["kyb"], state["bureau"], state["gst"], state["financials"], state["fraud"]
     )
     return {
         "policy_result": r,
-        "stage": "policy",
+        "stage": "memo",
         "audit": _audit("policy_completed", {"outcome": r["outcome"], "failed_rules": r["failed_rules"]}),
     }
 
 
-def policy_gate(state: LoanState):
-    return _continue_gate(
-        "policy",
-        "Policy assessment",
-        "Deterministic credit policy rules have been evaluated. Review passed and failed rules before memo generation.",
-        "memo",
-    )
-
-
-def memo_stage(state: LoanState):
+def memo_node(state: LoanState):
     app = state["application"]
     evidence = {
         "application": app,
@@ -249,62 +158,68 @@ def memo_stage(state: LoanState):
     return {
         "credit_memo": memo.strip(),
         "rag_context": rag_context,
-        "stage": "memo",
+        "stage": "review",
         "audit": _audit("credit_memo_generated", {"llm_used": llm is not None}),
     }
 
 
-def memo_gate(state: LoanState):
-    return _continue_gate(
-        "memo",
-        "Credit memo",
-        "The evidence-grounded credit memo is ready. Review it before sending the case to a credit officer.",
-        "review",
-    )
-
-
-def review_stage(state: LoanState):
+def review_node(state: LoanState):
     decision = interrupt({
         "stage": "review",
         "title": "Credit officer review",
-        "message": "Review the complete case and select Approve, Reject or Request Information in the UI.",
+        "message": "Review the complete case and select Approve, Reject or Request Information.",
         "allowed_actions": ["approve", "reject", "request_info"],
     })
-    return {"hitl_decision": decision, "stage": "decision", "audit": _audit("human_review_completed", decision)}
+    action = decision.get("action", "request_info") if isinstance(decision, dict) else "request_info"
+    status = {
+        "approve": "APPROVED",
+        "reject": "REJECTED",
+        "request_info": "MORE_INFORMATION_REQUIRED",
+    }.get(action, "MORE_INFORMATION_REQUIRED")
+    return {
+        "hitl_decision": decision,
+        "final_status": status,
+        "stage": "complete",
+        "audit": _audit("human_review_completed", {**(decision if isinstance(decision, dict) else {}), "status": status}),
+    }
 
 
-def final_stage(state: LoanState):
-    action = state.get("hitl_decision", {}).get("action", "request_info")
-    status = {"approve": "APPROVED", "reject": "REJECTED", "request_info": "MORE_INFORMATION_REQUIRED"}.get(action, "MORE_INFORMATION_REQUIRED")
-    return {"final_status": status, "stage": "complete", "audit": _audit("final_decision", {"status": status})}
+def route_stage(state: LoanState):
+    return state.get("stage", "application")
 
 
 def build_stepwise_graph():
+    """One-stage-at-a-time LangGraph.
+
+    Streamlit owns navigation. LangGraph executes exactly one stage per invocation.
+    The only LangGraph interrupt is the genuine credit-officer HITL checkpoint.
+    """
     builder = StateGraph(LoanState)
-    stages = [
-        ("application", intake_stage),
-        ("application_gate", application_gate),
-        ("documents", documents_stage),
-        ("kyb", kyb_stage), ("kyb_gate", kyb_gate),
-        ("bureau", bureau_stage), ("bureau_gate", bureau_gate),
-        ("gst", gst_stage), ("gst_gate", gst_gate),
-        ("cashflow", cashflow_stage), ("cashflow_gate", cashflow_gate),
-        ("financials", financials_stage), ("financials_gate", financials_gate),
-        ("fraud", fraud_stage), ("fraud_gate", fraud_gate),
-        ("policy", policy_stage), ("policy_gate", policy_gate),
-        ("memo", memo_stage), ("memo_gate", memo_gate),
-        ("review", review_stage), ("decision", final_stage),
-    ]
-    for name, fn in stages:
+    nodes = {
+        "application": application_node,
+        "documents": documents_node,
+        "kyb": kyb_node,
+        "bureau": bureau_node,
+        "gst": gst_node,
+        "cashflow": cashflow_node,
+        "financials": financials_node,
+        "fraud": fraud_node,
+        "policy": policy_node,
+        "memo": memo_node,
+        "review": review_node,
+    }
+    for name, fn in nodes.items():
         builder.add_node(name, fn)
-    builder.add_edge(START, "application")
-    for current, nxt in zip([x[0] for x in stages], [x[0] for x in stages][1:]):
-        builder.add_edge(current, nxt)
-    builder.add_edge("decision", END)
+
+    builder.add_conditional_edges(START, route_stage, {name: name for name in nodes})
+    for name in nodes:
+        builder.add_edge(name, END)
     return builder.compile(checkpointer=MemorySaver())
 
 
-def start_or_resume(graph, config, state=None, resume=None):
-    if resume is None:
-        return graph.invoke(state, config)
-    return graph.invoke(Command(resume=resume), config)
+def run_stage(graph, config, state):
+    return graph.invoke(state, config)
+
+
+def resume_human_review(graph, config, payload):
+    return graph.invoke(Command(resume=payload), config)

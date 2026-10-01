@@ -161,3 +161,9 @@ The Streamlit UI now follows a bank-style onboarding journey rather than executi
 12. Final decision
 
 The demo tools remain synthetic. Replace them with institution-approved APIs and controls before production use.
+
+## V3 workflow architecture
+
+V3 separates user navigation from LangGraph execution. Streamlit controls the applicant/credit-officer journey, while each LangGraph invocation executes exactly one specialist stage. The only LangGraph interrupt is the genuine credit-officer HITL checkpoint.
+
+Flow: Application → Documents → KYC/KYB → Bureau → GST → Cash Flow → Financials → Fraud → Policy → Credit Memo → Credit Officer → Decision.
