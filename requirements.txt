@@ -1,0 +1,13 @@
+langgraph
+langchain-core
+langchain-anthropic
+anthropic
+chromadb
+pandas
+numpy
+pydantic
+python-dotenv
+scikit-learn
+streamlit
+jupyter
+pytest
