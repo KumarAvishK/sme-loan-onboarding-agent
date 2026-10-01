@@ -3,7 +3,39 @@ import streamlit as st
 from app.workflow import build_stepwise_graph, run_stage, resume_human_review
 from app.sample_data import APPLICATION
 
-st.set_page_config(page_title="SME Loan Onboarding Agent", page_icon="🏦", layout="wide")
+st.set_page_config(page_title="EXL Bank | SME Lending", page_icon="🏦", layout="wide", initial_sidebar_state="expanded")
+
+# --- Enterprise banking visual system ---
+st.markdown("""
+<style>
+:root { --orange:#FF5B35; --orange2:#E94825; --navy:#17324D; --navy2:#234D6B; --teal:#2E667F; --mint:#EEF5F7; --ink:#172B3A; --muted:#64788A; --line:#DCE5EC; --bg:#F6F8FA; --white:#FFFFFF; --amber:#C47D19; }
+.stApp { background:var(--bg); color:var(--ink); }
+[data-testid="stHeader"] { background:rgba(245,248,250,.94); }
+[data-testid="stSidebar"] { background:#17324D; }
+[data-testid="stSidebar"] * { color:#F4F7F9 !important; }
+[data-testid="stSidebar"] .stButton button { background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.16); color:#fff !important; }
+.block-container { padding-top:1.1rem; max-width:1420px; }
+.bank-topbar { background:#fff; border:1px solid var(--line); border-radius:14px; padding:13px 20px; display:flex; align-items:center; justify-content:space-between; box-shadow:0 2px 10px rgba(11,42,74,.05); margin-bottom:20px; }
+.bank-topbar img { height:54px; }
+.bank-security { color:#64788A; font-size:13px; font-weight:600; }
+.bank-security span { color:var(--orange); }
+.hero { background:linear-gradient(115deg,#17324D 0%,#234D6B 68%,#2D647C 100%); color:white; border-radius:18px; padding:28px 32px; margin-bottom:22px; box-shadow:0 10px 30px rgba(11,42,74,.14); }
+.hero h1 { color:white !important; margin:0 0 5px 0; font-size:30px; }
+.hero p { color:#D7E5EF; margin:0; font-size:15px; }
+.section-card { background:white; border:1px solid var(--line); border-radius:14px; padding:22px 24px; margin:12px 0; box-shadow:0 2px 8px rgba(11,42,74,.04); }
+.step-pill { display:inline-block; background:#FFF0EC; color:#C83E22; border-radius:999px; padding:5px 11px; font-size:12px; font-weight:700; margin-bottom:8px; }
+.stButton > button { border-radius:9px; min-height:42px; font-weight:650; }
+.stButton > button[kind="primary"] { background:#17324D; border-color:#0B2A4A; }
+.stButton > button[kind="primary"]:hover { background:#E94825; border-color:#E94825; }
+[data-testid="stMetric"] { background:white; border:1px solid var(--line); border-radius:12px; padding:13px 15px; }
+[data-testid="stFileUploader"] { background:#FBFCFD; border:1px dashed #B8C8D4; border-radius:10px; padding:4px; }
+.stProgress > div > div > div > div { background:#FF5B35; }
+hr { border-color:var(--line); }
+.small-muted { color:#66798A; font-size:13px; }
+.status-good { color:#167052; font-weight:700; }
+</style>
+""", unsafe_allow_html=True)
+
 
 STAGES = [
     ("application", "Application"),
@@ -27,7 +59,7 @@ if "case" not in st.session_state:
 if "thread_id" not in st.session_state:
     st.session_state.thread_id = None
 if "documents" not in st.session_state:
-    st.session_state.documents = {"files": [], "document_count": 0}
+    st.session_state.documents = {"files": [], "document_count": 0, "uploaded": {}, "requirements": []}
 
 
 def config():
@@ -64,13 +96,121 @@ def reset_case():
 def fmt_inr(value):
     return f"₹{value:,.0f}"
 
-st.title("SME Loan Onboarding Agent")
-st.caption("Bank-style stepwise onboarding • LangGraph orchestration • RAG • deterministic credit policy • human approval")
+def get_document_requirements(app):
+    """Build an entity- and loan-purpose-specific document checklist.
+
+    This is a demo requirement engine; production rules must be configured
+    against the bank\'s approved KYC/KYB, credit and legal policy.
+    """
+    entity = app.get("entity_type", "Private Limited")
+    purpose = app.get("purpose", "Working Capital")
+    gst = app.get("gst_registered", True)
+    itr = app.get("itr_applicable", True)
+    audited = app.get("audited_financials", False)
+
+    docs = [
+        {"id":"business_pan", "name":"Business PAN card", "category":"Legal identity", "required":True, "help":"PAN of the borrowing entity / proprietor."},
+    ]
+
+    if entity == "Private Limited":
+        docs += [
+            {"id":"incorporation", "name":"Certificate of Incorporation", "category":"Legal identity", "required":True, "help":"MCA certificate establishing the company."},
+            {"id":"moa", "name":"Memorandum of Association (MOA)", "category":"Legal identity", "required":True, "help":"Latest MOA and amendments, where applicable."},
+            {"id":"aoa", "name":"Articles of Association (AOA)", "category":"Legal identity", "required":True, "help":"Latest AOA and amendments, where applicable."},
+            {"id":"shareholding", "name":"Latest shareholding pattern", "category":"Ownership & authority", "required":True, "help":"Current ownership / shareholding statement."},
+            {"id":"board_resolution", "name":"Board resolution / borrowing authority", "category":"Ownership & authority", "required":True, "help":"Authority to borrow and identify authorised signatory."},
+            {"id":"director_pan", "name":"Director PAN card(s)", "category":"Promoter / director KYC", "required":True, "help":"PAN for relevant directors / authorised persons."},
+            {"id":"director_ovd", "name":"Director KYC — Aadhaar / other OVD", "category":"Promoter / director KYC", "required":True, "help":"Aadhaar or another accepted Officially Valid Document; exact requirements follow the bank KYC policy."},
+            {"id":"ubo_declaration", "name":"Beneficial ownership / UBO declaration", "category":"Ownership & authority", "required":True, "help":"Identify and verify applicable beneficial owners."},
+        ]
+    elif entity == "LLP":
+        docs += [
+            {"id":"incorporation", "name":"LLP incorporation certificate", "category":"Legal identity", "required":True, "help":"MCA LLP incorporation document."},
+            {"id":"llp_agreement", "name":"LLP Agreement", "category":"Legal identity", "required":True, "help":"Latest executed LLP agreement and amendments."},
+            {"id":"partners", "name":"Partner / designated partner details", "category":"Ownership & authority", "required":True, "help":"Current partner list and ownership / contribution details."},
+            {"id":"partner_pan", "name":"Partner PAN card(s)", "category":"Promoter / partner KYC", "required":True, "help":"PAN for relevant partners / authorised persons."},
+            {"id":"partner_ovd", "name":"Partner KYC — Aadhaar / other OVD", "category":"Promoter / partner KYC", "required":True, "help":"Aadhaar or another accepted OVD as applicable under the bank KYC policy."},
+            {"id":"ubo_declaration", "name":"Beneficial ownership declaration", "category":"Ownership & authority", "required":True, "help":"Applicable beneficial owners / controlling persons."},
+        ]
+    elif entity == "Partnership":
+        docs += [
+            {"id":"partnership_deed", "name":"Partnership Deed", "category":"Legal identity", "required":True, "help":"Latest executed partnership deed and amendments."},
+            {"id":"partner_authority", "name":"Partner authorisation / borrowing authority", "category":"Ownership & authority", "required":True, "help":"Authority for borrowing and authorised signatory."},
+            {"id":"partner_pan", "name":"Partner PAN card(s)", "category":"Promoter / partner KYC", "required":True, "help":"PAN for relevant partners / authorised persons."},
+            {"id":"partner_ovd", "name":"Partner KYC — Aadhaar / other OVD", "category":"Promoter / partner KYC", "required":True, "help":"Aadhaar or another accepted OVD as applicable under the bank KYC policy."},
+            {"id":"ubo_declaration", "name":"Beneficial ownership declaration", "category":"Ownership & authority", "required":True, "help":"Applicable beneficial owners / controlling persons."},
+        ]
+    else:  # Proprietorship
+        docs += [
+            {"id":"proprietor_pan", "name":"Proprietor PAN card", "category":"Promoter KYC", "required":True, "help":"PAN of the proprietor."},
+            {"id":"proprietor_ovd", "name":"Proprietor KYC — Aadhaar / other OVD", "category":"Promoter KYC", "required":True, "help":"Aadhaar or another accepted OVD; not universally Aadhaar-only."},
+        ]
+
+    docs += [
+        {"id":"business_address", "name":"Business / registered-office address proof", "category":"Address", "required":True, "help":"For example property tax receipt, municipal khata, electricity bill, valid lease/rent agreement, consent letter or applicable government document."},
+        {"id":"authorised_signatory", "name":"Authorised signatory KYC & authority", "category":"Ownership & authority", "required":True, "help":"Identity/KYC plus appointment/authorisation evidence where applicable."},
+    ]
+
+    if gst:
+        docs += [
+            {"id":"gst_certificate", "name":"GST Registration Certificate / GSTIN proof", "category":"Tax", "required":True, "help":"GST registration details where the business is GST-registered."},
+            {"id":"gstr1", "name":"Latest GSTR-1 filing(s)", "category":"Tax", "required":True, "help":"Latest available filing(s), subject to the bank's lookback policy."},
+            {"id":"gstr3b", "name":"Latest GSTR-3B filing(s)", "category":"Tax", "required":True, "help":"Latest available filing(s), subject to the bank's lookback policy."},
+        ]
+
+    if itr:
+        docs.append({"id":"itr", "name":"Latest ITR / income-tax filing", "category":"Tax", "required":True, "help":"Latest applicable ITR and computation / acknowledgement."})
+
+    docs += [
+        {"id":"bank_statements", "name":"Business bank statements — last 12 months", "category":"Banking", "required":True, "help":"Primary operating account(s); production should use consented Account Aggregator / bank feeds where available."},
+        {"id":"existing_loans", "name":"Existing loan sanction letters / repayment schedules", "category":"Banking", "required":True, "help":"All material existing borrowing and repayment obligations."},
+    ]
+
+    if audited:
+        docs.append({"id":"audited_financials", "name":"Latest audited financial statements", "category":"Financials", "required":True, "help":"Balance Sheet, P&L and Cash Flow, with notes / audit report as applicable."})
+    else:
+        docs.append({"id":"financials", "name":"Latest financial statements / computation", "category":"Financials", "required":True, "help":"Latest Balance Sheet and P&L or applicable financial statements."})
+
+    if purpose in ["Working Capital"]:
+        docs += [
+            {"id":"receivables_payables", "name":"Receivables & payables ageing", "category":"Loan purpose", "required":True, "help":"Latest ageing supporting working-capital assessment."},
+            {"id":"stock_statement", "name":"Latest stock / inventory statement", "category":"Loan purpose", "required":True, "help":"Required where relevant to the working-capital facility."},
+        ]
+    elif purpose in ["Term Loan", "Equipment / Capex"]:
+        docs += [
+            {"id":"vendor_quote", "name":"Vendor quotation / pro-forma invoice", "category":"Loan purpose", "required":True, "help":"For the asset / equipment / capex being financed."},
+            {"id":"project_cost", "name":"Project cost / capex estimate", "category":"Loan purpose", "required":True, "help":"Cost, funding mix and implementation details."},
+        ]
+    elif purpose == "Business Expansion":
+        docs += [
+            {"id":"project_report", "name":"Business expansion / project report", "category":"Loan purpose", "required":True, "help":"Expansion plan, investment and projected economics."},
+            {"id":"projected_financials", "name":"Projected financial statements", "category":"Loan purpose", "required":True, "help":"Projections supporting the requested facility."},
+        ]
+
+    return docs
+
+
+
+st.markdown(f"""
+<div class="bank-topbar">
+  <img src="data:image/svg+xml;utf8,{__import__('urllib.parse').parse.quote(open('assets/exl-bankmark.svg', encoding='utf-8').read())}" />
+  <div class="bank-security">🔒 Secure SME Lending Workspace &nbsp; <span>● Systems operational</span></div>
+</div>
+<div class="hero">
+  <div class="step-pill">EXL BANK • SME LENDING</div>
+  <h1>Business Loan Onboarding</h1>
+  <p>Digital SME lending workflow with structured onboarding, evidence validation and credit decision support.</p>
+</div>
+""", unsafe_allow_html=True)
+
+st.markdown("<div style='text-align:right;color:#7B8995;font-size:11px;margin-top:-10px;margin-bottom:8px;'>Concept demonstration • Not an actual EXL banking product</div>", unsafe_allow_html=True)
 
 stage = current_stage()
 idx = next((i for i, (key, _) in enumerate(STAGES) if key == stage), 0)
 
 with st.sidebar:
+    st.image("assets/exl-wordmark.svg", use_container_width=True)
+    st.markdown("<div style='font-size:12px;opacity:.75;margin:-8px 0 16px 4px;'>SME CREDIT ORIGINATION</div>", unsafe_allow_html=True)
     st.header("Application journey")
     for i, (key, label) in enumerate(STAGES):
         if i < idx:
@@ -87,6 +227,7 @@ with st.sidebar:
 
 if st.session_state.case is None:
     st.progress(0)
+    st.markdown("<div class='section-card'>", unsafe_allow_html=True)
     st.header("1. Start a new SME loan application")
     st.write("Capture the information a relationship manager or applicant would provide. External credit, tax and banking data will be retrieved later by specialist agents.")
 
@@ -97,6 +238,9 @@ if st.session_state.case is None:
             applicant_name = st.text_input("Legal business name", value="")
             entity_type = st.selectbox("Entity type", ["Private Limited", "LLP", "Partnership", "Proprietorship"])
             industry = st.text_input("Industry", value="")
+            gst_registered = st.checkbox("GST registered", value=True)
+            itr_applicable = st.checkbox("ITR applicable", value=True)
+            audited_financials = st.checkbox("Audited financial statements available", value=False)
             vintage = st.number_input("Business vintage (years)", min_value=0, max_value=100, value=3)
         with c2:
             requested_amount = st.number_input("Requested facility (₹)", min_value=100000, value=2500000, step=100000)
@@ -137,6 +281,9 @@ if st.session_state.case is None:
                 "annual_turnover": turnover,
                 "annual_ebitda": ebitda,
                 "existing_debt": existing_debt,
+                "gst_registered": gst_registered,
+                "itr_applicable": itr_applicable,
+                "audited_financials": audited_financials,
                 "current_assets": current_assets,
                 "current_liabilities": current_liabilities,
                 "annual_interest": annual_interest,
@@ -149,13 +296,15 @@ if st.session_state.case is None:
             execute_stage("application")
             st.rerun()
     st.info("Demo note: bureau, GST and banking information are simulated in this prototype and will be retrieved by agents in later stages.")
+    st.markdown("</div>", unsafe_allow_html=True)
     st.stop()
 
 case = st.session_state.case
 stage = current_stage()
 idx = next((i for i, (key, _) in enumerate(STAGES) if key == stage), 0)
 st.progress(idx / (len(STAGES) - 1))
-st.header(f"Stage {idx + 1} of {len(STAGES)} — {STAGES[idx][1]}")
+st.markdown(f"<div class='step-pill'>STEP {idx + 1} OF {len(STAGES)}</div>", unsafe_allow_html=True)
+st.header(STAGES[idx][1])
 
 app = case["application"]
 
@@ -168,20 +317,63 @@ c4.metric("Application", app["application_id"])
 
 if stage == "documents":
     st.subheader("Document submission")
-    st.write("Upload the documents normally requested during SME loan onboarding. The prototype records the files; production will route them to Document Intelligence/OCR.")
-    files = st.file_uploader(
-        "Supporting documents",
-        accept_multiple_files=True,
-        type=["pdf", "png", "jpg", "jpeg", "xlsx", "csv"],
-        key="documents_uploader",
-    )
-    if files:
-        st.write("Selected documents:")
-        for f in files:
-            st.write(f"• {f.name}")
-    if st.button("Submit Documents & Continue to KYC / KYB", type="primary", use_container_width=True):
-        docs = {"files": [f.name for f in files], "document_count": len(files)}
-        execute_stage("documents", {"documents": docs})
+    st.write("The checklist below is generated from the entity type, tax applicability and loan purpose. Upload each required document against its specific requirement.")
+
+    requirements = get_document_requirements(app)
+    existing = st.session_state.documents.get("uploaded", {})
+    uploaded = dict(existing)
+
+    # Group the checklist so the applicant sees a bank-style document request.
+    categories = []
+    for d in requirements:
+        if d["category"] not in categories:
+            categories.append(d["category"])
+
+    for category in categories:
+        st.markdown(f"### {category}")
+        for d in [x for x in requirements if x["category"] == category]:
+            label = f"{d['name']}" + ("  **(Mandatory)**" if d["required"] else "  *(Optional)*")
+            st.markdown(label)
+            st.caption(d["help"])
+            f = st.file_uploader(
+                "Upload document",
+                type=["pdf", "png", "jpg", "jpeg"],
+                key=f"doc_{d['id']}",
+                label_visibility="collapsed",
+            )
+            if f is not None:
+                uploaded[d["id"]] = {"name": f.name, "size": f.size, "type": f.type}
+            elif d["id"] not in uploaded:
+                uploaded[d["id"]] = None
+
+    st.session_state.documents["uploaded"] = uploaded
+    st.session_state.documents["requirements"] = requirements
+
+    mandatory = [d for d in requirements if d["required"]]
+    missing = [d["name"] for d in mandatory if not uploaded.get(d["id"])]
+
+    st.divider()
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Mandatory documents", len(mandatory))
+    with col2:
+        st.metric("Missing mandatory documents", len(missing))
+
+    if missing:
+        st.warning("Please upload all mandatory documents before continuing. Missing: " + "; ".join(missing))
+    else:
+        st.success("All mandatory documents have been uploaded. Document Intelligence can now classify, extract and validate them.")
+
+    if st.button("Submit Documents & Continue to KYC / KYB", type="primary", use_container_width=True, disabled=bool(missing)):
+        execute_stage("documents", {
+            "documents": {
+                "files": [v["name"] for v in uploaded.values() if v],
+                "document_count": sum(1 for v in uploaded.values() if v),
+                "mandatory_document_count": len(mandatory),
+                "missing_mandatory": missing,
+                "checklist": requirements,
+            }
+        })
         st.rerun()
 
 elif stage == "kyb":

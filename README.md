@@ -167,3 +167,19 @@ The demo tools remain synthetic. Replace them with institution-approved APIs and
 V3 separates user navigation from LangGraph execution. Streamlit controls the applicant/credit-officer journey, while each LangGraph invocation executes exactly one specialist stage. The only LangGraph interrupt is the genuine credit-officer HITL checkpoint.
 
 Flow: Application → Documents → KYC/KYB → Bureau → GST → Cash Flow → Financials → Fraud → Policy → Credit Memo → Credit Officer → Decision.
+
+## V4: Specific document requirement engine
+
+The Documents stage now generates a tailored checklist from the application profile instead of asking for a generic set of files. It covers entity-specific legal documents, promoter/director/partner KYC, address proof, ownership/authority, GST and tax filings, financials, banking records, and loan-purpose documents.
+
+Examples:
+- Private Limited: PAN, Certificate of Incorporation, MOA, AOA, shareholding pattern, board borrowing authority, director PAN/KYC, UBO declaration.
+- LLP: incorporation certificate, LLP Agreement, partner details/PAN/KYC, UBO declaration.
+- Partnership: Partnership Deed, partner authority, partner PAN/KYC, UBO declaration.
+- Proprietorship: business/proprietor PAN and proprietor KYC.
+- Address: registered/business premises proof with acceptable alternatives.
+- Tax: GST Registration Certificate/GSTIN proof, GSTR-1, GSTR-3B and applicable ITR.
+- Banking: 12-month business bank statements and existing borrowing documents.
+- Purpose-specific: receivables/payables and stock for working capital; vendor quotation/project cost for capex; project report/projected financials for expansion.
+
+The Continue button remains disabled until every mandatory requirement has an uploaded file. Production should replace this demo ruleset with the bank's approved document policy and add OCR/classification, document authenticity checks, expiry checks, cross-document reconciliation and exception/HITL handling.
