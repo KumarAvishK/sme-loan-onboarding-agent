@@ -97,97 +97,101 @@ def fmt_inr(value):
     return f"₹{value:,.0f}"
 
 def get_document_requirements(app):
-    """Build an entity- and loan-purpose-specific document checklist.
+    """Return the controlled SME loan document checklist for the V6 experience.
 
-    This is a demo requirement engine; production rules must be configured
-    against the bank\'s approved KYC/KYB, credit and legal policy.
+    The demo intentionally limits document collection to the approved mandatory
+    and optional set requested for this version. Production rules should be
+    configured against the bank's approved credit/KYC policy.
     """
-    entity = app.get("entity_type", "Private Limited")
-    purpose = app.get("purpose", "Working Capital")
-    gst = app.get("gst_registered", True)
-    itr = app.get("itr_applicable", True)
-    audited = app.get("audited_financials", False)
+    return [
+        # Mandatory documents
+        {
+            "id": "business_pan",
+            "name": "Business PAN Card",
+            "category": "Mandatory Documents",
+            "required": True,
+            "help": "PAN of the borrowing business / legal entity.",
+        },
+        {
+            "id": "promoter_pan",
+            "name": "Director / Promoter PAN Card",
+            "category": "Mandatory Documents",
+            "required": True,
+            "help": "PAN of the relevant director, promoter or principal business owner.",
+        },
+        {
+            "id": "gst_certificate",
+            "name": "GST Registration Certificate",
+            "category": "Mandatory Documents",
+            "required": True,
+            "help": "Current GST registration certificate / GSTIN proof.",
+        },
+        {
+            "id": "bank_statements",
+            "name": "Business Bank Statement — 12–36 Months",
+            "category": "Mandatory Documents",
+            "required": True,
+            "help": "Primary business operating account statement covering the available 12–36 month period.",
+        },
+        {
+            "id": "financials",
+            "name": "Financial Statements — P&L and Balance Sheet",
+            "category": "Mandatory Documents",
+            "required": True,
+            "help": "Latest available financial statements, including Profit & Loss and Balance Sheet.",
+        },
+        {
+            "id": "gstr1",
+            "name": "Latest GSTR-1 Filing",
+            "category": "Mandatory Documents",
+            "required": True,
+            "help": "Most recent available GSTR-1 filing / acknowledgement.",
+        },
+        {
+            "id": "itr",
+            "name": "Latest ITR",
+            "category": "Mandatory Documents",
+            "required": True,
+            "help": "Latest applicable Income Tax Return filing / acknowledgement.",
+        },
+        {
+            "id": "business_address",
+            "name": "Business Registered Office Address Proof",
+            "category": "Mandatory Documents",
+            "required": True,
+            "help": "Valid proof of the registered office / business address, as accepted under the bank's policy.",
+        },
 
-    docs = [
-        {"id":"business_pan", "name":"Business PAN card", "category":"Legal identity", "required":True, "help":"PAN of the borrowing entity / proprietor."},
+        # Optional supporting documents
+        {
+            "id": "receivables_payables",
+            "name": "Receivables and Payables Ageing",
+            "category": "Optional Documents",
+            "required": False,
+            "help": "Latest receivables and payables ageing supporting working-capital assessment.",
+        },
+        {
+            "id": "stock_statement",
+            "name": "Stock / Inventory Statement",
+            "category": "Optional Documents",
+            "required": False,
+            "help": "Latest stock or inventory statement, where applicable.",
+        },
+        {
+            "id": "existing_loans",
+            "name": "Existing Loan Sanction",
+            "category": "Optional Documents",
+            "required": False,
+            "help": "Existing loan sanction letter(s) and related facility details, if applicable.",
+        },
+        {
+            "id": "shareholding",
+            "name": "Shareholding Pattern",
+            "category": "Optional Documents",
+            "required": False,
+            "help": "Latest shareholding / ownership pattern, if applicable.",
+        },
     ]
-
-    if entity == "Private Limited":
-        docs += [
-            {"id":"incorporation", "name":"Certificate of Incorporation", "category":"Legal identity", "required":True, "help":"MCA certificate establishing the company."},
-            {"id":"moa", "name":"Memorandum of Association (MOA)", "category":"Legal identity", "required":True, "help":"Latest MOA and amendments, where applicable."},
-            {"id":"aoa", "name":"Articles of Association (AOA)", "category":"Legal identity", "required":True, "help":"Latest AOA and amendments, where applicable."},
-            {"id":"shareholding", "name":"Latest shareholding pattern", "category":"Ownership & authority", "required":True, "help":"Current ownership / shareholding statement."},
-            {"id":"board_resolution", "name":"Board resolution / borrowing authority", "category":"Ownership & authority", "required":True, "help":"Authority to borrow and identify authorised signatory."},
-            {"id":"director_pan", "name":"Director PAN card(s)", "category":"Promoter / director KYC", "required":True, "help":"PAN for relevant directors / authorised persons."},
-            {"id":"director_ovd", "name":"Director KYC — Aadhaar / other OVD", "category":"Promoter / director KYC", "required":True, "help":"Aadhaar or another accepted Officially Valid Document; exact requirements follow the bank KYC policy."},
-            {"id":"ubo_declaration", "name":"Beneficial ownership / UBO declaration", "category":"Ownership & authority", "required":True, "help":"Identify and verify applicable beneficial owners."},
-        ]
-    elif entity == "LLP":
-        docs += [
-            {"id":"incorporation", "name":"LLP incorporation certificate", "category":"Legal identity", "required":True, "help":"MCA LLP incorporation document."},
-            {"id":"llp_agreement", "name":"LLP Agreement", "category":"Legal identity", "required":True, "help":"Latest executed LLP agreement and amendments."},
-            {"id":"partners", "name":"Partner / designated partner details", "category":"Ownership & authority", "required":True, "help":"Current partner list and ownership / contribution details."},
-            {"id":"partner_pan", "name":"Partner PAN card(s)", "category":"Promoter / partner KYC", "required":True, "help":"PAN for relevant partners / authorised persons."},
-            {"id":"partner_ovd", "name":"Partner KYC — Aadhaar / other OVD", "category":"Promoter / partner KYC", "required":True, "help":"Aadhaar or another accepted OVD as applicable under the bank KYC policy."},
-            {"id":"ubo_declaration", "name":"Beneficial ownership declaration", "category":"Ownership & authority", "required":True, "help":"Applicable beneficial owners / controlling persons."},
-        ]
-    elif entity == "Partnership":
-        docs += [
-            {"id":"partnership_deed", "name":"Partnership Deed", "category":"Legal identity", "required":True, "help":"Latest executed partnership deed and amendments."},
-            {"id":"partner_authority", "name":"Partner authorisation / borrowing authority", "category":"Ownership & authority", "required":True, "help":"Authority for borrowing and authorised signatory."},
-            {"id":"partner_pan", "name":"Partner PAN card(s)", "category":"Promoter / partner KYC", "required":True, "help":"PAN for relevant partners / authorised persons."},
-            {"id":"partner_ovd", "name":"Partner KYC — Aadhaar / other OVD", "category":"Promoter / partner KYC", "required":True, "help":"Aadhaar or another accepted OVD as applicable under the bank KYC policy."},
-            {"id":"ubo_declaration", "name":"Beneficial ownership declaration", "category":"Ownership & authority", "required":True, "help":"Applicable beneficial owners / controlling persons."},
-        ]
-    else:  # Proprietorship
-        docs += [
-            {"id":"proprietor_pan", "name":"Proprietor PAN card", "category":"Promoter KYC", "required":True, "help":"PAN of the proprietor."},
-            {"id":"proprietor_ovd", "name":"Proprietor KYC — Aadhaar / other OVD", "category":"Promoter KYC", "required":True, "help":"Aadhaar or another accepted OVD; not universally Aadhaar-only."},
-        ]
-
-    docs += [
-        {"id":"business_address", "name":"Business / registered-office address proof", "category":"Address", "required":True, "help":"For example property tax receipt, municipal khata, electricity bill, valid lease/rent agreement, consent letter or applicable government document."},
-        {"id":"authorised_signatory", "name":"Authorised signatory KYC & authority", "category":"Ownership & authority", "required":True, "help":"Identity/KYC plus appointment/authorisation evidence where applicable."},
-    ]
-
-    if gst:
-        docs += [
-            {"id":"gst_certificate", "name":"GST Registration Certificate / GSTIN proof", "category":"Tax", "required":True, "help":"GST registration details where the business is GST-registered."},
-            {"id":"gstr1", "name":"Latest GSTR-1 filing(s)", "category":"Tax", "required":True, "help":"Latest available filing(s), subject to the bank's lookback policy."},
-            {"id":"gstr3b", "name":"Latest GSTR-3B filing(s)", "category":"Tax", "required":True, "help":"Latest available filing(s), subject to the bank's lookback policy."},
-        ]
-
-    if itr:
-        docs.append({"id":"itr", "name":"Latest ITR / income-tax filing", "category":"Tax", "required":True, "help":"Latest applicable ITR and computation / acknowledgement."})
-
-    docs += [
-        {"id":"bank_statements", "name":"Business bank statements — last 12 months", "category":"Banking", "required":True, "help":"Primary operating account(s); production should use consented Account Aggregator / bank feeds where available."},
-        {"id":"existing_loans", "name":"Existing loan sanction letters / repayment schedules", "category":"Banking", "required":True, "help":"All material existing borrowing and repayment obligations."},
-    ]
-
-    if audited:
-        docs.append({"id":"audited_financials", "name":"Latest audited financial statements", "category":"Financials", "required":True, "help":"Balance Sheet, P&L and Cash Flow, with notes / audit report as applicable."})
-    else:
-        docs.append({"id":"financials", "name":"Latest financial statements / computation", "category":"Financials", "required":True, "help":"Latest Balance Sheet and P&L or applicable financial statements."})
-
-    if purpose in ["Working Capital"]:
-        docs += [
-            {"id":"receivables_payables", "name":"Receivables & payables ageing", "category":"Loan purpose", "required":True, "help":"Latest ageing supporting working-capital assessment."},
-            {"id":"stock_statement", "name":"Latest stock / inventory statement", "category":"Loan purpose", "required":True, "help":"Required where relevant to the working-capital facility."},
-        ]
-    elif purpose in ["Term Loan", "Equipment / Capex"]:
-        docs += [
-            {"id":"vendor_quote", "name":"Vendor quotation / pro-forma invoice", "category":"Loan purpose", "required":True, "help":"For the asset / equipment / capex being financed."},
-            {"id":"project_cost", "name":"Project cost / capex estimate", "category":"Loan purpose", "required":True, "help":"Cost, funding mix and implementation details."},
-        ]
-    elif purpose == "Business Expansion":
-        docs += [
-            {"id":"project_report", "name":"Business expansion / project report", "category":"Loan purpose", "required":True, "help":"Expansion plan, investment and projected economics."},
-            {"id":"projected_financials", "name":"Projected financial statements", "category":"Loan purpose", "required":True, "help":"Projections supporting the requested facility."},
-        ]
-
-    return docs
 
 
 
