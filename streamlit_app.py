@@ -1,4 +1,5 @@
 import streamlit as st
+from app.validation.document_intelligence import validate_uploaded_documents
 
 from app.workflow import build_stepwise_graph, run_stage, resume_human_review
 from app.sample_data import APPLICATION
@@ -156,9 +157,18 @@ if st.session_state.case is None:
             applicant_name = st.text_input("Legal business name", value="")
             entity_type = st.selectbox("Entity type", ["Private Limited", "LLP", "Partnership", "Proprietorship"])
             industry = st.text_input("Industry", value="")
+            business_pan_input = st.text_input("Business PAN", value="")
+            gstin_input = st.text_input("GSTIN", value="")
+            cin_input = st.text_input("CIN / LLPIN (if applicable)", value="")
+            registered_address_input = st.text_input("Registered office address", value="")
+            promoter_name_input = st.text_input("Director / promoter legal name", value="")
+            promoter_pan_input = st.text_input("Director / promoter PAN", value="")
+            promoter_dob_input = st.text_input("Director / promoter DOB (YYYY-MM-DD)", value="")
+            aadhaar_last4_input = st.text_input("Masked Aadhaar last 4 / accepted OVD test reference (never full Aadhaar)", value="", max_chars=12)
             gst_registered = st.checkbox("GST registered", value=True)
             itr_applicable = st.checkbox("ITR applicable", value=True)
             audited_financials = st.checkbox("Audited financial statements available", value=False)
+            verification_consent = st.checkbox("I consent to the demo's synthetic database checks for this application.", value=False)
             vintage = st.number_input("Business vintage (years)", min_value=0, max_value=100, value=3)
         with c2:
             requested_amount = st.number_input("Requested facility (₹)", min_value=100000, value=2500000, step=100000)
@@ -183,8 +193,22 @@ if st.session_state.case is None:
         submitted = st.form_submit_button("Submit Application", type="primary", use_container_width=True)
 
     if submitted:
-        if not applicant_name.strip() or not industry.strip():
-            st.error("Please enter the legal business name and industry before submitting.")
+        missing_identity = []
+        for field_label, field_value in [
+            ("legal business name", applicant_name), ("industry", industry),
+            ("business PAN", business_pan_input), ("GSTIN", gstin_input),
+            ("registered office address", registered_address_input),
+            ("director/promoter legal name", promoter_name_input),
+            ("director/promoter PAN", promoter_pan_input), ("director/promoter DOB", promoter_dob_input),
+        ]:
+            if not str(field_value or "").strip():
+                missing_identity.append(field_label)
+        if entity_type in {"Private Limited", "LLP"} and not cin_input.strip():
+            missing_identity.append("CIN / LLPIN")
+        if missing_identity:
+            st.error("Complete the required first-page identity fields before submitting: " + ", ".join(missing_identity))
+        elif not verification_consent:
+            st.error("Record consent for the synthetic demo checks before submitting.")
         else:
             app = {
                 **APPLICATION,
@@ -192,6 +216,14 @@ if st.session_state.case is None:
                 "applicant_name": applicant_name.strip(),
                 "entity_type": entity_type,
                 "industry": industry.strip(),
+                "business_pan": business_pan_input.strip(),
+                "gstin": gstin_input.strip(),
+                "cin": cin_input.strip(),
+                "registered_address": registered_address_input.strip(),
+                "promoter_name": promoter_name_input.strip(),
+                "promoter_pan": promoter_pan_input.strip(),
+                "promoter_dob": promoter_dob_input.strip(),
+                "aadhaar_last4": aadhaar_last4_input.strip(),
                 "business_vintage_years": vintage,
                 "requested_amount": requested_amount,
                 "tenure_months": tenure,
@@ -202,6 +234,7 @@ if st.session_state.case is None:
                 "gst_registered": gst_registered,
                 "itr_applicable": itr_applicable,
                 "audited_financials": audited_financials,
+                "verification_consent": "YES" if verification_consent else "NO",
                 "current_assets": current_assets,
                 "current_liabilities": current_liabilities,
                 "annual_interest": annual_interest,
@@ -260,7 +293,7 @@ if stage == "documents":
                 label_visibility="collapsed",
             )
             if f is not None:
-                uploaded[d["id"]] = {"name": f.name, "size": f.size, "type": f.type}
+                uploaded[d["id"]] = {"name": f.name, "size": f.size, "type": f.type, "content_bytes": f.getvalue()}
             elif d["id"] not in uploaded:
                 uploaded[d["id"]] = None
 
@@ -280,11 +313,11 @@ if stage == "documents":
     if missing:
         st.warning("Please upload all mandatory documents before continuing. Missing: " + "; ".join(missing))
     else:
-        st.success("All eight mandatory documents are present. Content authenticity and OCR are not yet automated in this demo.")
+        st.success("All eight mandatory files are present. Their readable PDF text will be extracted and compared with the synthetic customer database during validation.")
     readability_confirmed = st.checkbox(
         "I confirm the uploaded files are complete, legible and correspond to the selected document type.",
         key="document_readability_confirmed",
-        help="This is a demo attestation, not an automated OCR or authenticity check."
+        help="Scanned PDFs without selectable text will be routed for re-upload or manual review."
     )
 
     if not readability_confirmed:
@@ -341,6 +374,25 @@ elif stage == "financials":
         (case.get("documents") or {}),
         case.get("validation_inputs", {}),
     )
+    # Content-based check is authoritative for the synthetic demo gate.
+    # The UI upload step stores the bytes in session state; do not trust filenames alone.
+    try:
+        content_result = validate_uploaded_documents(
+            app,
+            st.session_state.documents,
+            consent=str((case.get("validation_inputs") or {}).get("verification_consent", app.get("verification_consent", "NO"))).upper() in {"YES","Y","TRUE","1"},
+        )
+        validation_result["document_content_validation"] = content_result
+        validation_result["can_proceed"] = bool(content_result.get("can_proceed"))
+        validation_result["content_summary"] = content_result.get("summary", {})
+        validation_result["eligibility"] = content_result.get("eligibility", {})
+        # Dashboard counts and visible checks must reflect the actual extracted-document validation,
+        # not the legacy registry-only matrix results.
+        validation_result["summary"] = content_result.get("summary", validation_result.get("summary", {}))
+        validation_result["checks"] = content_result.get("checks", validation_result.get("checks", []))
+    except Exception as exc:
+        validation_result["can_proceed"] = False
+        validation_result["document_content_validation"] = {"checks":[{"stage":"Document Intelligence","check":"Content validation engine","severity":"CRITICAL","status":"BLOCKED","feedback":f"Document validation failed safely ({type(exc).__name__}).","required_action":"Check backend configuration and re-upload documents.","blocks_financial_analysis":True}],"summary":{"total":1,"pass":0,"review":0,"blocked":1},"can_proceed":False,"eligibility":{}}
     save_case_state({"validation_result": validation_result})
     sm = validation_result["summary"]
     m1, m2, m3, m4 = st.columns(4)
@@ -356,6 +408,24 @@ elif stage == "financials":
         use_container_width=True,
         hide_index=True,
     )
+    content_result = validation_result.get("document_content_validation", {})
+    st.subheader("Uploaded document content checks")
+    st.caption(content_result.get("notice", "Content-based checks use the local synthetic database only."))
+    content_checks = content_result.get("checks", [])
+    if content_checks:
+        st.dataframe([{"Stage":c.get("stage"),"Check":c.get("check"),"Status":c.get("status"),
+                       "Observed":c.get("observed"),"Feedback":c.get("feedback"),"Required action":c.get("required_action")}
+                      for c in content_checks], use_container_width=True, hide_index=True)
+    eligibility = content_result.get("eligibility", {})
+    if eligibility:
+        st.subheader("Indicative repayment-capacity estimate")
+        ec1,ec2,ec3=st.columns(3)
+        ec1.metric("Requested amount",fmt_inr(eligibility.get("requested_amount_inr",0)))
+        ec2.metric("Indicative eligible amount",fmt_inr(eligibility.get("indicative_eligible_amount_inr",0)))
+        ec3.metric("Amount above eligibility",fmt_inr(eligibility.get("excess_amount_inr",0)))
+        for reason in eligibility.get("reasoning", []): st.warning(reason)
+        if eligibility.get("route_to_credit_officer"):
+            st.info("Refer to Credit Officer with the eligibility calculation and reasons. Do not auto-approve or silently reduce the requested amount.")
     if validation_result["can_proceed"]:
         st.success("All blocking validation checks passed. Financial Analysis is unlocked.")
         if st.button("Calculate Financial Metrics", type="primary", use_container_width=True):

@@ -13,3 +13,5 @@ jupyter
 pytest
 
 openpyxl
+
+pypdf>=4.2.0
