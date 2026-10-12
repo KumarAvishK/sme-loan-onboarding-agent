@@ -2,6 +2,7 @@ import streamlit as st
 
 from app.workflow import build_stepwise_graph, run_stage, resume_human_review
 from app.sample_data import APPLICATION
+from app.validation.matrix import get_document_requirements as get_document_requirements_from_matrix, run_validation_matrix
 
 st.set_page_config(page_title="EXL Bank | SME Lending", page_icon="🏦", layout="wide", initial_sidebar_state="expanded")
 
@@ -96,108 +97,21 @@ def reset_case():
 def fmt_inr(value):
     return f"₹{value:,.0f}"
 
-def get_document_requirements(app):
-    """Return the controlled SME loan document checklist for the V6 experience.
+def get_document_requirements(app=None):
+    """Use the bank's consolidated 8-mandatory / 4-optional checklist."""
+    return get_matrix_document_requirements()
 
-    The demo intentionally limits document collection to the approved mandatory
-    and optional set requested for this version. Production rules should be
-    configured against the bank's approved credit/KYC policy.
-    """
-    return [
-        # Mandatory documents
-        {
-            "id": "business_pan",
-            "name": "Business PAN Card",
-            "category": "Mandatory Documents",
-            "required": True,
-            "help": "PAN of the borrowing business / legal entity.",
-        },
-        {
-            "id": "promoter_pan",
-            "name": "Director / Promoter PAN Card",
-            "category": "Mandatory Documents",
-            "required": True,
-            "help": "PAN of the relevant director, promoter or principal business owner.",
-        },
-        {
-            "id": "gst_certificate",
-            "name": "GST Registration Certificate",
-            "category": "Mandatory Documents",
-            "required": True,
-            "help": "Current GST registration certificate / GSTIN proof.",
-        },
-        {
-            "id": "bank_statements",
-            "name": "Business Bank Statement — 12–36 Months",
-            "category": "Mandatory Documents",
-            "required": True,
-            "help": "Primary business operating account statement covering the available 12–36 month period.",
-        },
-        {
-            "id": "financials",
-            "name": "Financial Statements — P&L and Balance Sheet",
-            "category": "Mandatory Documents",
-            "required": True,
-            "help": "Latest available financial statements, including Profit & Loss and Balance Sheet.",
-        },
-        {
-            "id": "gstr1",
-            "name": "Latest GSTR-1 Filing",
-            "category": "Mandatory Documents",
-            "required": True,
-            "help": "Most recent available GSTR-1 filing / acknowledgement.",
-        },
-        {
-            "id": "itr",
-            "name": "Latest ITR",
-            "category": "Mandatory Documents",
-            "required": True,
-            "help": "Latest applicable Income Tax Return filing / acknowledgement.",
-        },
-        {
-            "id": "business_address",
-            "name": "Business Registered Office Address Proof",
-            "category": "Mandatory Documents",
-            "required": True,
-            "help": "Valid proof of the registered office / business address, as accepted under the bank's policy.",
-        },
 
-        # Optional supporting documents
-        {
-            "id": "receivables_payables",
-            "name": "Receivables and Payables Ageing",
-            "category": "Optional Documents",
-            "required": False,
-            "help": "Latest receivables and payables ageing supporting working-capital assessment.",
-        },
-        {
-            "id": "stock_statement",
-            "name": "Stock / Inventory Statement",
-            "category": "Optional Documents",
-            "required": False,
-            "help": "Latest stock or inventory statement, where applicable.",
-        },
-        {
-            "id": "existing_loans",
-            "name": "Existing Loan Sanction",
-            "category": "Optional Documents",
-            "required": False,
-            "help": "Existing loan sanction letter(s) and related facility details, if applicable.",
-        },
-        {
-            "id": "shareholding",
-            "name": "Shareholding Pattern",
-            "category": "Optional Documents",
-            "required": False,
-            "help": "Latest shareholding / ownership pattern, if applicable.",
-        },
-    ]
+def get_matrix_document_requirements():
+    return get_document_requirements_from_matrix()
+
+
 
 
 
 st.markdown(f"""
 <div class="bank-topbar">
-  <img src="data:image/svg+xml;utf8,{__import__('urllib.parse').parse.quote(open('assets/exl-bankmark.svg', encoding='utf-8').read())}" />
+  <img src="data:image/svg+xml;utf8,{__import__('urllib.parse').parse.quote(open('assets/exl-wordmark.svg', encoding='utf-8').read())}" />
   <div class="bank-security">🔒 Secure SME Lending Workspace &nbsp; <span>● Systems operational</span></div>
 </div>
 <div class="hero">
@@ -366,9 +280,16 @@ if stage == "documents":
     if missing:
         st.warning("Please upload all mandatory documents before continuing. Missing: " + "; ".join(missing))
     else:
-        st.success("All mandatory documents have been uploaded. Document Intelligence can now classify, extract and validate them.")
+        st.success("All eight mandatory documents are present. Content authenticity and OCR are not yet automated in this demo.")
+    readability_confirmed = st.checkbox(
+        "I confirm the uploaded files are complete, legible and correspond to the selected document type.",
+        key="document_readability_confirmed",
+        help="This is a demo attestation, not an automated OCR or authenticity check."
+    )
 
-    if st.button("Submit Documents & Continue to KYC / KYB", type="primary", use_container_width=True, disabled=bool(missing)):
+    if not readability_confirmed:
+        st.warning("Confirm legibility to continue. This is a demo attestation and does not replace automated document intelligence.")
+    if st.button("Submit Documents & Continue to KYC / KYB", type="primary", use_container_width=True, disabled=bool(missing) or not readability_confirmed):
         execute_stage("documents", {
             "documents": {
                 "files": [v["name"] for v in uploaded.values() if v],
@@ -376,7 +297,10 @@ if stage == "documents":
                 "mandatory_document_count": len(mandatory),
                 "missing_mandatory": missing,
                 "checklist": requirements,
-            }
+                "uploaded": uploaded,
+                "readability_confirmed": readability_confirmed,
+            },
+            "validation_inputs": (st.session_state.case or {}).get("validation_inputs", {}),
         })
         st.rerun()
 
@@ -411,9 +335,38 @@ elif stage == "cashflow":
 elif stage == "financials":
     st.subheader("Financial analysis")
     st.write("Financial ratios and repayment capacity are calculated deterministically from the submitted financial data.")
-    if st.button("Calculate Financial Metrics", type="primary", use_container_width=True):
-        execute_stage("financials")
-        st.rerun()
+    st.info("Pre-analysis validation gate: all critical identity, tax, document and cross-document checks must pass. Ambiguous matches are routed for review.")
+    validation_result = run_validation_matrix(
+        app,
+        (case.get("documents") or {}),
+        case.get("validation_inputs", {}),
+    )
+    save_case_state({"validation_result": validation_result})
+    sm = validation_result["summary"]
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Checks", sm["total"])
+    m2.metric("Passed", sm["pass"])
+    m3.metric("Review", sm["review"])
+    m4.metric("Blocked", sm["blocked"])
+    st.caption(validation_result["notice"])
+    st.dataframe(
+        [{"Stage": c.get("stage"), "Check": c.get("check"), "Severity": c.get("severity"),
+          "Status": c.get("status"), "Feedback": c.get("feedback"), "Required action": c.get("required_action")}
+         for c in validation_result["checks"]],
+        use_container_width=True,
+        hide_index=True,
+    )
+    if validation_result["can_proceed"]:
+        st.success("All blocking validation checks passed. Financial Analysis is unlocked.")
+        if st.button("Calculate Financial Metrics", type="primary", use_container_width=True):
+            execute_stage("financials", {"validation_result": validation_result})
+            st.rerun()
+    else:
+        st.error(f"Financial Analysis is locked: {sm['blocking']} blocking check(s) remain unresolved.")
+        st.write("Correct the input/document evidence or use an approved verification adapter, then rerun validation. The included registry only supports synthetic test IDs DEMO-APP-1001 and DEMO-APP-2002.")
+        if st.button("Return to Documents for corrections", use_container_width=True):
+            save_case_state({"stage": "documents"})
+            st.rerun()
 
 elif stage == "fraud":
     st.subheader("Fraud / anomaly screening")

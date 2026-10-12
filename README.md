@@ -183,3 +183,41 @@ Examples:
 - Purpose-specific: receivables/payables and stock for working capital; vendor quotation/project cost for capex; project report/projected financials for expansion.
 
 The Continue button remains disabled until every mandatory requirement has an uploaded file. Production should replace this demo ruleset with the bank's approved document policy and add OCR/classification, document authenticity checks, expiry checks, cross-document reconciliation and exception/HITL handling.
+
+
+## V6 validation matrix integration
+
+The backend now loads `data/EXL_Bank_SME_Loan_Validation_Master_Matrix.xlsx` and returns 33 row-level checks. Financial Analysis is fail-closed: any unresolved blocking CRITICAL/REVIEW check prevents the financial node from running.
+
+### Mandatory document checklist (8)
+
+1. Business PAN Card
+2. Director / Promoter PAN Card
+3. GST Registration Certificate
+4. Business Bank Statement (12–36 months, as configured)
+5. Financial Statements (P&L + Balance Sheet)
+6. Latest GSTR-1 Filing
+7. Latest ITR
+8. Business Registered Office Address Proof
+
+Optional supporting files: Receivables and Payables Ageing; Stock / Inventory Statement; Existing Loan Sanction; Shareholding Pattern.
+
+### Synthetic local test cases
+
+- `DEMO-APP-1001` — expected clean validation case. Use legal name `ABC Distributors Private Limited` and entity type `Private Limited`.
+- `DEMO-APP-2002` — expected exception case. The fixture intentionally contains GSTIN and promoter PAN mismatches; Financial Analysis must remain locked.
+
+For either test, upload all eight mandatory files in the Documents stage and confirm the demo legibility attestation. The synthetic identity/tax values are fixture data and do not prove the uploaded documents contain those values. No external portals are queried.
+
+### Validation limitations and production requirements
+
+- This version validates uploaded-file presence/type metadata and exercises field-level matching against a synthetic Excel registry. The legibility checkbox is a demo attestation; OCR, authenticity, expiry, signature, tampering and content extraction are not automated.
+- Unknown application IDs fail closed because no approved source has verified the identity/tax fields. Configure a bank-approved extraction and verification adapter before production.
+- Replace the mock registry with authorized, consented PAN/GST/MCA/KYC, bureau and banking integrations. Do not use this workbook for real identity verification.
+- LLM outputs are assistive; deterministic rules and authorized credit-officer approval remain the controls for binding decisions.
+
+### Run validation tests
+
+```powershell
+pytest -q
+```

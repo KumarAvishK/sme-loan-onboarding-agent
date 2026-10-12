@@ -7,6 +7,8 @@ class LoanState(TypedDict, total=False):
     request: str
     stage: str
     documents: Dict[str, Any]
+    validation_inputs: Dict[str, Any]
+    validation_result: Dict[str, Any]
     kyb: Dict[str, Any]
     bureau: Dict[str, Any]
     gst: Dict[str, Any]

@@ -9,6 +9,7 @@ from app.models import LoanState
 from app.policy.engine import run_policy_engine
 from app.rag.retriever import retrieve_credit_policy
 from app.llm.client import get_llm, llm_text
+from app.validation.matrix import run_validation_matrix
 
 
 def _audit(event: str, details: Dict[str, Any] | None = None):
@@ -27,7 +28,11 @@ def documents_node(state: LoanState):
     docs = state.get("documents", {})
     return {
         "stage": "kyb",
-        "audit": _audit("documents_received", docs),
+        "audit": _audit("documents_received", {
+            "document_count": docs.get("document_count", 0),
+            "mandatory_document_count": docs.get("mandatory_document_count", 0),
+            "missing_mandatory_count": len(docs.get("missing_mandatory", [])),
+        }),
     }
 
 
@@ -84,6 +89,20 @@ def cashflow_node(state: LoanState):
 
 def financials_node(state: LoanState):
     app = state["application"]
+    validation = run_validation_matrix(
+        app,
+        state.get("documents", {}),
+        state.get("validation_inputs", {}),
+    )
+    if not validation.get("can_proceed", False):
+        return {
+            "validation_result": validation,
+            "stage": "documents",
+            "audit": _audit("financial_analysis_blocked_by_validation", {
+                "blocking_checks": validation.get("summary", {}).get("blocking", 0),
+                "source_mode": validation.get("source_mode", "unknown"),
+            }),
+        }
     current_ratio = float(app.get("current_assets", 0)) / max(float(app.get("current_liabilities", 1)), 1)
     debt_to_ebitda = float(app.get("existing_debt", 0)) / max(float(app.get("annual_ebitda", 1)), 1)
     proposed_debt_service = float(app.get("requested_amount", 0)) / max(float(app.get("tenure_months", 12)) / 12, 1)
@@ -96,7 +115,12 @@ def financials_node(state: LoanState):
         "annual_ebitda": float(app.get("annual_ebitda", 0)),
         "dscr_demo": round(dscr, 2),
     }
-    return {"financials": result, "stage": "fraud", "audit": _audit("financial_analysis_completed", result)}
+    return {
+        "financials": result,
+        "validation_result": validation,
+        "stage": "fraud",
+        "audit": _audit("financial_analysis_completed", result),
+    }
 
 
 def fraud_node(state: LoanState):

@@ -11,3 +11,5 @@ scikit-learn
 streamlit
 jupyter
 pytest
+
+openpyxl
