@@ -428,8 +428,18 @@ elif stage == "financials":
             st.info("Refer to Credit Officer with the eligibility calculation and reasons. Do not auto-approve or silently reduce the requested amount.")
     if validation_result["can_proceed"]:
         st.success("All blocking validation checks passed. Financial Analysis is unlocked.")
-        if st.button("Calculate Financial Metrics", type="primary", use_container_width=True):
+        if st.button("Run Financial Analysis & Submit for Credit Review", type="primary", use_container_width=True):
+            # Persist the passed document-content gate before the graph runs financial analysis.
+            save_case_state({"validation_result": validation_result})
             execute_stage("financials", {"validation_result": validation_result})
+            # If analysis succeeded, complete the deterministic downstream stages and prepare
+            # the case for human review. The system never auto-sanctions the loan.
+            if current_stage() == "fraud":
+                execute_stage("fraud")
+            if current_stage() == "policy":
+                execute_stage("policy")
+            if current_stage() == "memo":
+                execute_stage("memo")
             st.rerun()
     else:
         blocking_count = sum(1 for check in validation_result.get("checks", []) if check.get("status") in {"BLOCKED", "REVIEW"})
@@ -462,6 +472,14 @@ elif stage == "memo":
 
 elif stage == "review":
     st.subheader("Credit officer review")
+    policy_result = case.get("policy_result", {})
+    outcome = str(policy_result.get("outcome", "REFER")).upper()
+    if outcome in {"APPROVE", "APPROVED", "ELIGIBLE"}:
+        st.success("Document validation and financial analysis completed. The case is eligible for credit-officer decision; this is not a final sanction.")
+    elif outcome in {"REFER", "REVIEW", "CONDITIONAL", "REFER_TO_CREDIT_OFFICER"}:
+        st.warning("Application sent to the Credit Officer for review. The system identified conditions or exceptions that require a human decision.")
+    else:
+        st.warning("Application analysis completed with policy concerns. The case is routed to the Credit Officer; no automatic loan sanction has been issued.")
     st.warning("Human approval required. This is the only commitment/decision point in the workflow.")
     policy = case.get("policy_result", {})
     c1, c2 = st.columns(2)

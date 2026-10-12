@@ -89,18 +89,27 @@ def cashflow_node(state: LoanState):
 
 def financials_node(state: LoanState):
     app = state["application"]
-    validation = run_validation_matrix(
-        app,
-        state.get("documents", {}),
-        state.get("validation_inputs", {}),
-    )
-    if not validation.get("can_proceed", False):
+    # Reuse the content-based validation result computed on the Financial Analysis screen.
+    # Do not rerun the legacy registry-only matrix after the user has passed the real upload gate.
+    validation = state.get("validation_result", {})
+    content_validation = validation.get("document_content_validation", {})
+    if content_validation:
+        validation_passed = bool(content_validation.get("can_proceed", False))
+    else:
+        validation = run_validation_matrix(
+            app,
+            state.get("documents", {}),
+            state.get("validation_inputs", {}),
+        )
+        validation_passed = bool(validation.get("can_proceed", False))
+    if not validation_passed:
         return {
             "validation_result": validation,
-            "stage": "documents",
+            "stage": "financials",
             "audit": _audit("financial_analysis_blocked_by_validation", {
-                "blocking_checks": validation.get("summary", {}).get("blocking", 0),
-                "source_mode": validation.get("source_mode", "unknown"),
+                "blocking_checks": validation.get("summary", {}).get("blocked",
+                    validation.get("summary", {}).get("blocking", 0)),
+                "source_mode": validation.get("source_mode", "synthetic_document_validation"),
             }),
         }
     current_ratio = float(app.get("current_assets", 0)) / max(float(app.get("current_liabilities", 1)), 1)
