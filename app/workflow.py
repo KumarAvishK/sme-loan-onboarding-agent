@@ -158,10 +158,15 @@ def memo_node(state: LoanState):
         "cashflow": state["cashflow"], "financials": state["financials"],
         "fraud": state["fraud"], "policy": state["policy_result"],
     }
-    rag_context = retrieve_credit_policy.invoke({
-        "query": "SME loan credit policy KYC bureau GST cash flow DSCR human approval",
-        "top_k": 4,
-    })
+    try:
+        rag_context = retrieve_credit_policy.invoke({
+            "query": "SME loan credit policy KYC bureau GST cash flow DSCR human approval",
+            "top_k": 4,
+        })
+    except Exception as exc:
+        # Retrieval enriches the memo but is not authoritative and must not take
+        # down the full application when the local vector store is unavailable.
+        rag_context = f"Local policy retrieval unavailable ({type(exc).__name__}); memo uses supplied case evidence only."
     llm = get_llm()
     if llm is not None:
         memo = llm_text(

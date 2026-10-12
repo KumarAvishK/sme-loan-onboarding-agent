@@ -1,4 +1,9 @@
+from pathlib import Path
+from urllib.parse import quote
 import streamlit as st
+
+PROJECT_ROOT = Path(__file__).resolve().parent
+LOGO_PATH = PROJECT_ROOT / "assets" / "exl-wordmark.svg"
 from app.validation.document_intelligence import validate_uploaded_documents
 
 from app.workflow import build_stepwise_graph, run_stage, resume_human_review
@@ -112,7 +117,7 @@ def get_matrix_document_requirements():
 
 st.markdown(f"""
 <div class="bank-topbar">
-  <img src="data:image/svg+xml;utf8,{__import__('urllib.parse').parse.quote(open('assets/exl-wordmark.svg', encoding='utf-8').read())}" />
+  <img src="data:image/svg+xml;utf8,{quote(LOGO_PATH.read_text(encoding='utf-8') if LOGO_PATH.exists() else '<svg xmlns="http://www.w3.org/2000/svg" width="220" height="54"><text x="0" y="36" font-size="30" font-family="Arial" font-weight="700" fill="#17324D">EXL Bank</text></svg>')}" />
   <div class="bank-security">🔒 Secure SME Lending Workspace &nbsp; <span>● Systems operational</span></div>
 </div>
 <div class="hero">
@@ -128,7 +133,7 @@ stage = current_stage()
 idx = next((i for i, (key, _) in enumerate(STAGES) if key == stage), 0)
 
 with st.sidebar:
-    st.image("assets/exl-wordmark.svg", use_container_width=True)
+    st.image(str(LOGO_PATH), use_container_width=True) if LOGO_PATH.exists() else st.markdown("## EXL Bank")
     st.markdown("<div style='font-size:12px;opacity:.75;margin:-8px 0 16px 4px;'>SME CREDIT ORIGINATION</div>", unsafe_allow_html=True)
     st.header("Application journey")
     for i, (key, label) in enumerate(STAGES):
