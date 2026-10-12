@@ -226,3 +226,8 @@ pytest -q
 ## Synthetic document intelligence update
 
 This version extracts embedded text from uploaded PDFs using `pypdf`, reconciles selected fields to `data/EXL_Bank_Synthetic_Customer_Database.xlsx`, blocks mismatches, and estimates indicative repayment capacity. Scanned PDFs without text are routed for re-upload/manual review (OCR requires a separately configured OCR engine). All database records and policy terms are fictional. The attached policy letter is not a real bank offer. See `APPLICANT_FIELDS_AND_MISMATCH_RULES.md`.
+
+
+### Fix for supplied approved-case ID
+
+The synthetic validator accepts `SME-10001`, `SME-APP-10001`, and `DEMO-APP-1001` as aliases for the clean fixture, and `SME-20002`, `SME-APP-20002`, and `DEMO-APP-2002` for the exception fixture. The Financial Analysis locked-message counter now uses the actual validation checks rather than an undefined variable.

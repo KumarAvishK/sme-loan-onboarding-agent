@@ -432,7 +432,8 @@ elif stage == "financials":
             execute_stage("financials", {"validation_result": validation_result})
             st.rerun()
     else:
-        st.error(f"Financial Analysis is locked: {sm['blocking']} blocking check(s) remain unresolved.")
+        blocking_count = sum(1 for check in validation_result.get("checks", []) if check.get("status") in {"BLOCKED", "REVIEW"})
+        st.error(f"Financial Analysis is locked: {blocking_count} blocking/review check(s) remain unresolved.")
         st.write("Correct the input/document evidence or use an approved verification adapter, then rerun validation. The included registry only supports synthetic test IDs DEMO-APP-1001 and DEMO-APP-2002.")
         if st.button("Return to Documents for corrections", use_container_width=True):
             save_case_state({"stage": "documents"})

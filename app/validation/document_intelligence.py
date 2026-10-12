@@ -80,7 +80,17 @@ def _one(rows, app_id):
     return next((r for r in rows if str(r.get("application_id",""))==str(app_id)),None)
 def validate_uploaded_documents(application: dict, documents: dict, consent: bool, db_path=None) -> dict:
     """Extract text from uploaded bytes, reconcile with seeded DB, and apply conservative gate."""
-    db=load_database(db_path); app_id=str(application.get("application_id",""))
+    db=load_database(db_path); supplied_app_id=str(application.get("application_id","")).strip()
+    # Support IDs printed on the supplied synthetic PDFs as aliases to seeded demo records.
+    aliases = {
+        "SME-10001": "DEMO-APP-1001",
+        "SME-APP-10001": "DEMO-APP-1001",
+        "DEMO-APP-1001": "DEMO-APP-1001",
+        "SME-20002": "DEMO-APP-2002",
+        "SME-APP-20002": "DEMO-APP-2002",
+        "DEMO-APP-2002": "DEMO-APP-2002",
+    }
+    app_id=aliases.get(supplied_app_id.upper(), supplied_app_id)
     approw=_one(db["Application_Form"],app_id)
     business=_one(db["Synthetic_Business_DB"],app_id)
     promoter=_one(db["Synthetic_Promoter_DB"],app_id)
